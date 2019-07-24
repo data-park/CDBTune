@@ -343,6 +343,9 @@ class DDPG(object):
         self.noise.reset(sigma)
 
     def _sample_batch(self):
+        """
+        Sample a batch of data from memory pool
+        """
         batch, idx = self.replay_memory.sample(self.batch_size)
         # batch = self.replay_memory.sample(self.batch_size)
         states = map(lambda x: x[0].tolist(), batch)
@@ -354,6 +357,7 @@ class DDPG(object):
         return idx, states, next_states, actions, rewards, terminates
 
     def add_sample(self, state, action, reward, next_state, terminate):
+        # evaluation mode, because network w/ dropout needs to calculate output
         self.critic.eval()
         self.actor.eval()
         self.target_critic.eval()
@@ -361,16 +365,19 @@ class DDPG(object):
         batch_state = self.normalizer([state.tolist()])
         batch_next_state = self.normalizer([next_state.tolist()])
         current_value = self.critic(batch_state, self.totensor([action.tolist()]))
+        # using network to calculate output
         target_action = self.target_actor(batch_next_state)
         target_value = self.totensor([reward]) \
             + self.totensor([0 if x else 1 for x in [terminate]]) \
             * self.target_critic(batch_next_state, target_action) * self.gamma
+        # TD Error
         error = float(torch.abs(current_value - target_value).data.numpy()[0])
-
+        # training mode
         self.target_actor.train()
         self.actor.train()
         self.critic.train()
         self.target_critic.train()
+        # saving the transition to the memory pool
         self.replay_memory.add(error, (state, action, reward, next_state, terminate))
 
 
@@ -390,9 +397,8 @@ class DDPG(object):
 
         current_value = self.critic(batch_states, batch_actions)
         next_value = batch_rewards + mask * target_next_value * self.gamma
-        # Update Critic
-
-        # update prioritized memory
+        # Update Critic by using TD error as loss function
+        # Update samples' priority by TD error
         error = torch.abs(current_value-next_value).data.numpy()
         for i in range(self.batch_size):
             idx = idxs[i]
@@ -403,7 +409,7 @@ class DDPG(object):
         loss.backward()
         self.critic_optimizer.step()
 
-        # Update Actor
+        # Update Actor by using Critic's output as loss function
         self.critic.eval()
         policy_loss = -self.critic(batch_states, self.actor(batch_states))
         policy_loss = policy_loss.mean()
@@ -413,6 +419,7 @@ class DDPG(object):
         self.actor_optimizer.step()
         self.critic.train()
 
+        # Update target networks w/ slow rate
         self._update_target(self.target_critic, self.critic, tau=self.tau)
         self._update_target(self.target_actor, self.actor, tau=self.tau)
 

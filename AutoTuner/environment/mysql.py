@@ -215,9 +215,11 @@ class MySQLEnv(object):
         restart_time = utils.time_start()
         flag = self._apply_knobs(knob)
         restart_time = utils.time_end(restart_time)
+        # ?
         if not flag:
             return -10000000.0, np.array([0] * self.num_metric), True, self.score - 10000000, [0, 0, 0], restart_time
         s = self._get_state(knob, method=self.method)
+        # crash
         if s is None:
             return -10000000.0, np.array([0] * self.num_metric), True, self.score - 10000000, [0, 0, 0], restart_time
         external_metrics, internal_metrics = s
@@ -395,7 +397,7 @@ class TencentServer(MySQLEnv):
         Raises:
             Exception: setup failed
         """
-        
+
         instance_id = self.db_info['instance_id']
 
         data = dict()
@@ -407,9 +409,9 @@ class TencentServer(MySQLEnv):
         data["para_list"] = para_list
         data = json.dumps(data)
         data = "data=" + data
-        
+
         response = parse_json(CONST.URL_SET_PARAM % self.host, data)
-        
+
         err = response['errno']
         if err != 0:
             raise Exception("SET UP FAILED: {}".format(err))
@@ -466,7 +468,7 @@ class TencentServer(MySQLEnv):
                 os_quit(Err.SET_MYSQL_PARAM_FAILED)
             flag = self._apply_knobs(self.default_knobs)
             i += 1
-        
+
 
         external_metrics, internal_metrics = self._get_state(knob = self.default_knobs, method=self.method)
         if os.path.exists(self.best_result):
@@ -541,3 +543,92 @@ class TencentServer(MySQLEnv):
             return False
 
         return False
+
+
+class Server(MySQLEnv):
+    """ Build an environment directly on Server
+    """
+
+    def __init__(self, wk_type, instance_name):
+        MySQLEnv.__init__(self, wk_type)
+        self.wk_type = wk_type
+        self.score = 0.0
+        self.steps = 0
+        self.terminate = False
+        self.last_external_metrics = None
+        self.instance_name = instance_name
+        self.db_info = configs.instance_config[instance_name]
+        self.server_ip = self.db_info['host']
+        self.alpha = 1.0
+        knobs.init_knobs(instance_name, num_more_knobs=0)
+        self.default_knobs = knobs.get_init_knobs()
+
+    def initialize(self):
+        """ Initialize the environment when an episode starts
+        Returns:
+            state: np.array, current state
+        """
+        self.score = 0.0
+        self.last_external_metrics = []
+        self.steps = 0
+        self.terminate = False
+
+        flag = self._apply_knobs(self.default_knobs)
+        i = 0
+        while not flag:
+            flag = self._apply_knobs(self.default_knobs)
+            i += 1
+            if i >= 5:
+                print("Initialize: {} times ....".format(i))
+
+        external_metrics, internal_metrics = self._get_state(knob = self.default_knobs, method=self.method)
+        self.last_external_metrics = external_metrics
+        self.default_externam_metrics = external_metrics
+        state = internal_metrics
+        knobs.save_knobs(
+            self.default_knobs,
+            metrics=external_metrics,
+            knob_file='%sAutoTuner/tuner/save_knobs/knob_metric.txt' % PROJECT_DIR
+        )
+        return state, external_metrics
+
+    def _apply_knobs(self, knob):
+        """ Apply the knobs to the mysql
+        Args:
+            knob: dict, mysql parameters
+        Returns:
+            flag: whether the setup is valid
+        """
+        self.steps += 1
+        utils.modify_configurations(
+            server_ip=self.server_ip,
+            instance_name=self.instance_name,
+            configuration=knob
+        )
+
+        steps = 0
+        max_steps = 300
+        flag = utils.test_mysql(self.instance_name)
+        while not flag and steps < max_steps:
+            _st = utils.get_mysql_state(self.server_ip)
+            time.sleep(5)
+            flag = utils.test_mysql(self.instance_name)
+            steps += 1
+
+        if not flag:
+            utils.modify_configurations(
+                server_ip=self.server_ip,
+                instance_name=self.instance_name,
+                configuration=self.default_knobs
+            )
+            params = ''
+            for key in knob.keys():
+                params += ' --%s=%s' % (key, knob[key])
+            with open('failed.log', 'a+') as f:
+                f.write('{}\n'.format(params))
+            return False
+        else:
+            return True
+
+
+DockerServer = Server

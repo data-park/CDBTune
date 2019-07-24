@@ -15,7 +15,8 @@ config = {
     'clr': 0.001,
     'gamma': 0.9,
     'batch_size': 32,
-    'tau': 0.002
+    'tau': 0.002,
+    'memory_size': 1028
 }
 
 env = gym.make('MountainCarContinuous-v0')  # ('Hopper-v1')

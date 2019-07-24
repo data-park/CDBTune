@@ -44,6 +44,10 @@ def init_knobs(instance,num_total_knobs):
     disk_size = instance["max_disk"] * 1024 * 1024 * 1024
 
     KNOB_DETAILS = {
+        '''
+        Each knob is saved as a (key : value) dictionary
+        Each knob's value is saved as a [type, [min, max, initialize value]]
+        '''
         ###'skip_name_resolve': ['enum', ['OFF', 'ON']],
         'table_open_cache': ['integer', [1, 10240, 512]],
         #'max_connections': ['integer', [1100, 100000, 80000]],

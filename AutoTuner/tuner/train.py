@@ -146,9 +146,11 @@ if __name__ == '__main__':
             if opt.noisy:
                 model.sample_noise()
             action_step_time = utils.time_start()
+            # sample a transition (s, r, a, s_)
+            # calculate the action a_t for state s_t from deterministic policy
             action = model.choose_action(state)
             action_step_time = utils.time_end(action_step_time)
-
+            # from action to knobs
             if opt.method == 'ddpg':
                 current_knob = generate_knob(action, 'ddpg')
                 logger.info("[ddpg] Action: {}".format(action))
@@ -158,6 +160,7 @@ if __name__ == '__main__':
                 logger.info("[dqn] Q:{} Action: {}".format(qvalue, action))
 
             env_step_time = utils.time_start()
+            # env receives action and return reward r_t and next state s(t+1)
             reward, state_, done, score, metrics, restart_time = env.step(current_knob)
             env_step_time = utils.time_end(env_step_time)
             logger.info(
@@ -167,24 +170,28 @@ if __name__ == '__main__':
             env_restart_times.append(restart_time)
 
             next_state = state_
-
-            model.add_sample(state, action,reward, next_state, done)
+            # calculate TD error and add the transition to memory pool
+            model.add_sample(state, action, reward, next_state, done)
 
             if reward > 10:
                 fine_state_actions.append((state, action))
 
             current_state = next_state
             train_step_time = 0.0
+            # when memory pool is larger than batch_size, update network
             if len(model.replay_memory) > opt.batch_size:
                 losses = []
                 train_step_time = utils.time_start()
+                # each time, update the network twice
                 for i in xrange(2):
                     losses.append(model.update())
                     train_step += 1
                 train_step_time = utils.time_end(train_step_time)/2.0
 
                 if opt.method == 'ddpg':
+                    # Critic loss
                     accumulate_loss[0] += sum([x[0] for x in losses])
+                    # Actor loss
                     accumulate_loss[1] += sum([x[1] for x in losses])
                     logger.info('[{}][Episode: {}][Step: {}] Critic: {} Actor: {}'.format(
                         opt.method, episode, t, accumulate_loss[0] / train_step, accumulate_loss[1] / train_step
